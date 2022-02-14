@@ -1,0 +1,160 @@
+---
+title: "case study AQR"
+author: "Rayane"
+date: "2/10/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(fUnitRoots)
+library(tseries)
+library(readxl)
+library(readr)
+library(moments)
+library(tseries)
+library(quadprog)
+library(dplyr)
+library(xaringan)
+library(lubridate)
+library(tidyverse)
+library(xts)
+library(knitr)
+library(kableExtra)
+library(data.table)
+```
+
+```{r setup, include=FALSE}
+#Charging the data 
+FF_mom=read.csv(file="F-F_Momentum_Factor.CSV", sep=",", dec=".", header=F)
+FF_research=read.csv(file="FF_research.data.factors.CSV", sep=",", dec=".", header=F)
+p.strat=read.csv(file="elec.case.csv", sep=";", dec=".", header=F)
+MOMret=read.csv(file="elec.case2.csv", sep=";", dec=".", header=F)
+Ind.port=read.csv(file="49.ind.port.csv", sep=";", dec=".", header=T)
+FF_mom=FF_mom[13:1185,]
+colnames(FF_mom)=c("Date", "mom")
+FF_research.m=FF_research[4:1089,]
+FF_research.annual=FF_research[1092:1181,]
+colnames(FF_research.m)=c("date", "Mkt-RF", "SMB", "HML", "RF")
+colnames(FF_research.annual)=c("date", "Mkt-RF", "SMB", "HML", "RF")
+p.strat=p.strat[,-c(3,7,11)]
+p.strat=p.strat[-c(1:4),]
+colnames(p.strat)=c("year", "Mkt-rf","H.B2M","LowB2M","HML", "SmallMC", "BigMC","S-M.MC","U","D","UMD")
+Ind.port=Ind.port[-1,]
+Ind.port=Ind.port[,-1]
+colnames(Ind.port)=c("Date","Agric","Food","Soda","Beer","Smoke","Toys","Fun","Books","Hshld","Clths","Hlth","MedEq","Drugs","Chems","Rubbr","Txtls","BldMt","Cnstr","Steel","FabPr","Mach","ElcEq","Autos","Aero", "Ships","Guns","Gold","Mines","Coal","Oil","Util","Telcm","PerSv","BusSv","Hardw","Softw","Chips","LabEq","Paper","Boxes","Trans","Whlsl","Rtail","Meals","Banks","Insur","RlEst","Fin", "Other")
+colnames(MOMret)=c("Year","Low","2","3","4","5","6","7","8","9","High","High-Low")
+MOMret=MOMret[-c(1:3),]
+for (i in 1:12) {
+  MOMret[,i]=gsub(",",".",MOMret[,i])
+  MOMret[,i]=as.numeric(MOMret[,i])
+}
+for (i in 1:2) {
+  FF_mom[,i]=gsub(",",".",FF_mom[,i])
+  FF_mom[,i]=as.numeric(FF_mom[,i])
+}
+for (i in 1:5) {
+  FF_research.annual[,i]=gsub(",",".",FF_research.annual[,i])
+  FF_research.annual[,i]=as.numeric(FF_research.annual[,i])
+}
+for (i in 1:5) {
+  FF_research.m[,i]=gsub(",",".",FF_research.m[,i])
+  FF_research.m[,i]=as.numeric(FF_research.m[,i])
+}
+for (i in 1:50) {
+  Ind.port[,i]=gsub(",",".",Ind.port[,i])
+  Ind.port[,i]=as.numeric(Ind.port[,i])
+}
+for (i in 1:11) {
+  p.strat[,i]=gsub(",",".",p.strat[,i])
+  p.strat[,i]=as.numeric(p.strat[,i])
+}
+Ind.port.cum=Ind.port
+Ind.port.cum[,2:50]=1+Ind.port[,2:50]/100
+```
+#Question1
+```{r setup, include=FALSE}
+MOM.Long.only=MOMret$High
+
+Mkt.rf=p.strat$`Mkt-rf`
+HML=p.strat$`HML`
+SML=p.strat$`S-M.MC`
+UMD=p.strat$UMD
+
+Mkt.rf=as.numeric(gsub(",",".",Mkt.rf))
+HML=as.numeric(gsub(",",".",HML))
+SML=as.numeric(gsub(",",".",SML))
+UMD=as.numeric(gsub(",",".",UMD))
+X=lm(MOM.Long.only~Mkt.rf+HML+SML+UMD)
+library(pander)
+panderOptions("digits", 2)
+pander(X)
+```
+
+#Question2
+```{r setup, include=FALSE}
+Cor.long.only.value=cor(x=MOMret$High, y=p.strat$HML)
+Cor.mom.value=cor(MOMret$`High-Low`, y=p.strat$HML)
+print(Cor.long.only.value)
+print(Cor.mom.value)
+```
+#Question3
+```{r setup, include=FALSE}
+#Computing the returns of the ind.momentum strategy 
+X=0
+Ind.mom.long.only=1
+Ind.mom.long.and.shorts=1
+for (i in 2057:2177) {
+  for (j in 2:50) {
+    X[j-1]=prod(Ind.port.cum[i-3:12,j])
+  }
+  deciles=ntile(X, 10)
+  indices.winners=which(deciles==10)
+  indices.winners=as.numeric(indices.winners)
+  Ind.mom.long.only[i-2055]=Ind.mom.long.only[i-2056]*sum(Ind.port.cum[i,indices.winners+1])/length(indices.winners)
+  X=0
+  deciles=0
+}
+Ind.mom.long.only=Ind.mom.long.only[2:121]
+Ind.mom.long.only.ts=ts(Ind.mom.long.only, start=2007, frequency=12)
+
+#Comparing them to other strategies
+##Graphs
+HML.FF=cumprod(1+FF_research.m$HML[967:1086]/100)
+Mkt.rf.FF=cumprod(1+FF_research.m$`Mkt-RF`[967:1086]/100)
+SMB.FF=cumprod(1+FF_research.m$SMB[967:1086]/100)
+Rf.FF=cumprod(1+FF_research.m$RF[967:1086]/100)
+FF_MOM.lastdecade=cumprod(1+FF_mom[961:1080,2]/100)
+HML.FF.ts=ts(HML.FF, start=2007, frequency=12)
+FF_MOM.lastdecade.ts=ts(FF_MOM.lastdecade, start=2007, frequency=12)
+#Comparing INd. MOM, FF.MOM
+ts.plot(Ind.mom.long.only.ts, FF_MOM.lastdecade.ts, gpars = list(col = c("blue", "green", "black"), xlab="Year", ylab="Cumulative returns", lty=c(1:3)))
+
+#Comparing INd. MOM, FF.MOM and value 
+ts.plot(Ind.mom.long.only.ts, FF_MOM.lastdecade.ts, HML.FF.ts, gpars = list(col = c("blue", "green", "black"), xlab="Year", ylab="Cumulative returns", lty=c(1:3)))
+##Correlation
+cor(Ind.mom.long.only,HML.FF)
+
+#Combining IND.MOM, FF.MOM, and FF VALUE : equally weighted 
+## Computing Ind.MOM simple returns because the first ones were cumulative returns
+X=0
+Ind.mom.long.only.s=1
+for (i in 2057:2177) {
+  for (j in 2:50) {
+    X[j-1]=prod(Ind.port[i-3:12,j])
+  }
+  deciles=ntile(X, 10)
+  indices.winners=which(deciles==10)
+  indices.winners=as.numeric(indices.winners)
+  Ind.mom.long.only.s[i-2056]=sum(Ind.port[i,indices.winners+1])/length(indices.winners)
+  X=0
+  deciles=0
+}
+Ind.mom.long.only.s=Ind.mom.long.only.s[1:120]
+
+IndM.FFMOM.FFVALUE=cumprod(1+(Ind.mom.long.only.s+FF_research.m$HML[967:1086]+FF_mom[970:1089,2])/300)
+IndM.FFMOM.FFVALUE=ts(IndM.FFMOM.FFVALUE, start=2007, frequency=12)
+ts.plot(IndM.FFMOM.FFVALUE,gpars = list(col = c("blue", "green"), xlab="Year", ylab="Cumulative returns", lty=c(1:3)))
+```
+
+
+
