@@ -1,0 +1,296 @@
+---
+title: |
+  | Asset Allocation and Investment Strategies
+  | Assignment 2
+author: |
+  | Group 13
+  | Junru Yang, Jayanth Sai Basaboina, Mahesh Golla, Rayane Ballout
+  | CID:  02133629,01119936,01825907, 02270273
+  | Business School, Imperial College London
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+  fig_caption: yes
+  template: null
+  number_sections: yes
+  html_notebook: default
+  html_document:
+  df_print: paged
+  toc: true
+  theme: united
+
+---
+---
+\newpage
+\tableofcontents
+\listoffigures
+\listoftables
+\newpage
+\sloppy
+
+```{r,message=FALSE, echo=FALSE}
+library(tidyverse)
+library(lubridate)
+library(dbplyr)
+library(readxl)
+library(fUnitRoots)
+library(broom)
+library(sandwich)
+library(lmtest)
+library(tinytex)
+library(knitr)
+library(kableExtra)
+library(data.table)
+
+```
+
+
+```{r,echo=FALSE}
+data=read_xls("ps2_data.xls")
+data=as.data.frame(data)
+names(data) = gsub(" ", "_", names(data))
+```
+
+# Question 1
+## (i) 
+
+We first begin by computing the dividend-price ratios by using the following formula:
+$$\frac{D_{t+1}}{P_{t+1}} = \frac{P_{t+1}+D_{t+1}}{P_{t}} \frac{P_{t}}{P_{t+1}}-1 = \frac{R_{t+1}}{R^{ex-d}_{t+1}}-1$$
+
+```{r}
+data=data%>%
+  mutate(DPratio=((1+VW_Return_Incl._Dividends)/(1+VW_Return_Excl._Dividends)-1))%>%
+  mutate(divgrowth=DPratio/dplyr::lag(DPratio,1)*(1+VW_Return_Excl._Dividends))
+```
+
+
+
+```{r, echo=FALSE}
+#add one back to return and do the calculation 
+#compute dividend growth for questions later for the sake of code simplification
+
+head(data$DPratio) #top 6 value of the D/Pratio
+```
+
+In order to understand the variation in the dividend-price ratio we conduct a Augmented Dickey-Fuller Test to test the null hypothesis whether the D/P ratio is not time stationary. Since we get a P value of 0.2543, we cannot reject the null at any significance value. Thus, dividend-price ratio is not time-stationary.
+Interestingly, we find a downward trend in the ratio. The plot is presented in figure 1.  
+
+```{r, echo=FALSE}
+adfTest(data$DPratio)
+```
+
+```{r, echo=FALSE, fig.cap="Dividend-Price ratio plot"}
+ggplot(data=data)+
+  geom_line(aes(x=year, y=DPratio))+
+  theme_classic()
+```
+
+## (ii)
+ 
+We now plot the dividend-price ratio since Great Depression i.e. from 1940, against the industry growth. The result is shown in figure 2.
+```{r, echo=FALSE}
+data12=data[which(data$year==1940):86,] #Great Depression ended at 1939
+```
+
+```{r, fig.cap="Correlation plot", echo=FALSE}
+ggplot(data=data12,aes(x=as.numeric(Rate_of_Change_in_Industrial_Production_Index), y=DPratio))+
+  geom_point()+
+  geom_smooth(method="lm",formula=y~x)+
+  theme_classic()+
+  labs(x="Rate of Change in Industrial Production Index")
+```
+
+There is a positive correlation of 0.22 between the D/P ratio and the growth in industrial production. This suggests a positive co-movements. 
+
+The range of plot is between 0.015 (min) to 0.072 (max) for D/P ratio while the range for industrial production index growth is -0.27 (min) to 0.242 (max).
+
+\newpage 
+
+## (iii & iv)
+
+We now compute the dividend yield for the time period using the following equation:
+
+$$\frac{D_{t+1}}{D_{t}} = \frac{D_{t+1}/P_{t+1}}{D_{t}/P_{t}} \frac{P_{t+1}}{D_{t+1}} = \frac{D_{t+1}/P_{t+1}} {D_{t}/P_{t}} {R^{ex-d}_{t+1}}$$
+Using dividend growths, we compute the cumulative product to find the collective growth for t years. We then regress the cumulative dividend growth on the dividend price ratio. These results are presented in table 1. 
+
+```{r, echo=FALSE}
+#Data cleaning and preparation
+data13=data[which(data$year==1946):89,] 
+#select WWII ended at 1945, data started from 1946
+```
+
+```{r}
+data13=data13%>%
+  mutate(cummulative_div_growth=cumprod(divgrowth))%>%
+  mutate(divgrowth=DPratio/dplyr::lag(DPratio,1)*(1+VW_Return_Excl._Dividends))%>%
+  select(DPratio,divgrowth,cummulative_div_growth)
+```
+
+
+```{r, echo=FALSE}
+#result storage matrix
+result1=matrix(nrow=10, ncol=6)
+colnames(result1)=c("n", "Beta","t-value","p-value","Robusted t(NW)","Adj. R squared")
+result1[,1]=seq(1,10,by=1)
+```
+
+
+```{r}
+range1=nrow(data13)
+for (i in 1:10){
+  reg1iii=lm(log(cummulative_div_growth[(1+i):range1]/cummulative_div_growth[1:(range1-i)])
+             ~ log(DPratio[1:(range1-i)]), data=data13)
+  
+  result1[i,2]=round(summary(reg1iii)$coefficients[2,1],4) #beta
+  result1[i,3]=round(summary(reg1iii)$coefficients[2,3],4) #t-value
+  result1[i,4]=round(summary(reg1iii)$coefficients[2,4],4) #p-value
+  result1[i,6]=round(summary(reg1iii)$adj.r.squared,4) #R2
+  
+  robust=coeftest(reg1iii,vcov=NeweyWest(reg1iii, lag=12))
+  result1[i,5]=round(robust[2,3],4)
+}
+```
+
+```{r, echo=FALSE}
+knitr::kable(result1, caption="Regression of ln(dividend growth) on ln(D/P ratio)", format = "latex") %>%  kable_styling(latex_options = "HOLD_position")
+```
+
+
+At any significant level, we find that the P-values aren't significant enough to say that the dividend price ratio can predict the dividend growth. 
+
+To estimate a robust standard error we try to find an estimator to contorl for autocorrelation and heteroskedasticity in the model. Autocorrelation and heteroskedasticity could be a possible due to overlapping observations which has to accounted using the Neweywest test. As the lag terms between the errors increases, the correlation betweeen the errors falls. With the lag 12, we hence find the smaller t values (robust t (NW)) relative to  standard t values. 
+
+## (V)
+
+We find that the dividend yield does not predict the dividend growth i.e. economic growth. This was based on the regressions presented in question 1 part 3 and 4. Since D/P ratios does not predict dividend growth and D/P ratios are volatile from figure 1, Cochrane argues that D/P ratios predict stock returns using the Campbell-Shiller decomposition. Volatility in stock prices can either come from volatility in future dividends or time varying expected future returns. In other words, expected risk premia must vary over time and be predictable. 
+
+
+# Question 2
+
+```{r, echo=FALSE}
+#Data preparation
+data2=data[which(data$year==1947):which(data$year==2009),]
+result2i=matrix(nrow=10, ncol=6)
+colnames(result2i)=c("n","Beta","t-value","p-value","Robusted t(NW)","Adj. R squared")
+result2i[,1]=seq(1,10,by=1)
+result2ii=matrix(nrow=10, ncol=6)
+colnames(result2ii)=c("n","Beta","t-value","p-value","Robusted t(NW)","Adj. R squared")
+result2ii[,1]=seq(1,10,by=1)
+
+data2=data2%>%
+  mutate(cummulative_div_growth=cumprod(divgrowth))
+```
+
+## i,ii & iii
+
+We first compute the log returns using the following formula:
+$$ Log (r_{t})= Log (R_{t}) - Log(R^{f}_t)$$
+
+```{r, message=FALSE}
+# Excess return using return with div. - rf
+data2=data2%>%mutate(log_er=log(VW_Return_Incl._Dividends+1)- 
+                       log(1+`90_Day_Bill_Returns`))
+range2=nrow(data2)
+
+#Rt+1 (i)&(ii)
+for (i in 1:10){
+  reg2a=lm(log_er[(1+i):range2] ~ log(DPratio[1:(range2-i)]), data=data2)
+  
+  result2i[i,2]=round(summary(reg2a)$coefficients[2,1],4) #beta
+  result2i[i,3]=round(summary(reg2a)$coefficients[2,3],4) #t-value
+  result2i[i,4]=round(summary(reg2a)$coefficients[2,4],4) #p-value
+  result2i[i,6]=round(summary(reg2a)$adj.r.squared,4) #R2
+  
+  robust=coeftest(reg2a,vcov=NeweyWest(reg2a, lag=12))
+  result2i[i,5]=round(robust[2,3],4)
+}
+
+#Delta Dt+i/Dt (i)&(ii)
+for (i in 1:10){
+  reg2b=lm(log(cummulative_div_growth[(1+i):range2]/cummulative_div_growth[1:(range2-i)])
+           ~ log(DPratio[1:(range2-i)]), data=data2)
+  
+  result2ii[i,2]=round(summary(reg2b)$coefficients[2,1],4) #beta
+  result2ii[i,3]=round(summary(reg2b)$coefficients[2,3],4) #t-value
+  result2ii[i,4]=round(summary(reg2b)$coefficients[2,4],4) #p-value
+  result2ii[i,6]=round(summary(reg2b)$adj.r.squared,4) #R2
+  
+  robust=coeftest(reg2b,vcov=NeweyWest(reg2b, lag=12))
+  result2ii[i,5]=round(robust[2,3],4)
+}
+```
+We run the log returns linear regression on the dividend price ratio and a few significant evidence of return predictability even when overlapping observations where considered. These results are presented in Figure 3. If this prediction exists, it means the risk premia can be predicted using the D/P ratio.
+
+When we run the regression of long term dividend growth on D/P ratio, we kind no evidence of predictability. The NW test T statistics presented in figure 3 are higher in general relative to the the standard t value. 
+
+```{r, fig.cap="Regression table for beta", echo=FALSE}
+knitr::include_graphics("/Users/jayanth/Downloads/CW2_files/figure-latex/table2aais.png")
+```
+
+# Question 3
+
+## i
+
+We begin by taking the equation 3 and then take logs on both sides
+
+$$R_{t+1}\ =\frac{P_{t+1}\ +D_{t+1}}{P_t}\ =\ \frac{\frac{P_{t+1}}{D_{t+1}}+1}{\frac{P_t}{D_t}}\ \frac{D_{t+1}}{D_t}$$
+
+$$take\ log\ on \ both \ sides \ to \ get \ log \ yields:\ r_{t+1}=\ log({\frac{P_{t+1}}{D_{t+1}}+1})-log(\frac{P_t}{D_t})+log(\frac{D_{t+1}}{D_t})$$ 
+Based on the hints we know, 
+$$where, \ log(\frac{P_t}{D_t})=p_t-d_t,\ log(\frac{D_{t+1}}{D_t})=\triangle d_{t+1}\ and\ \ \  log({\frac{P_{t+1}}{D_{t+1}}+1})=log(1+e^{p_{t+1}-d_{t+1}}) $$
+
+
+$$\ this \ results \ in:\ r_{t+1}=\ log(1+e^{p_{t+1}-d_{t+1}})-(p_t-d_t)+\triangle d_{t+1}$$
+We now employ the Taylor series expansion, 
+
+$$log(1+e^x)\approx log(1+e^{p-d})+\frac{e^{p-d}}{1+e^{p-d}}(x-(p-d))$$
+
+$$Hence:\ \ log(1+e^{p_{t+1}-d_{t+1}})=log(1+e^{p-d})+\frac{e^{p-d}}{1+e^{p-d}}({p_{t+1}-d_{t+1}}-(p-d))$$
+
+$$\ log(1+e^{p-d})=log(1+\frac{P}{D})\ \ \ \ \ and \ \ \ \ \ \  \rho=\frac{e^{p-d}}{1+e^{p-d}}=\frac{P/D}{P/D+1}$$
+
+$$log(1+e^{p_{t+1}-d_{t+1}})=log(1+\frac{P}{D})+\rho({p_{t+1}-d_{t+1}})-\rho\ (p-d)$$ 
+
+$$the \ constant\ value\: \ log(1+\frac{P}{D})-\rho\ (p-d)=k$$
+$$\ log({\frac{P_{t+1}}{D_{t+1}}+1})=log(1+e^{p_{t+1}-d_{t+1}})=k+\rho({p_{t+1}-d_{t+1}})$$
+
+
+$$r_{t+1}\approx k+\rho({p_{t+1}-d_{t+1}})-(p_t-d_t)+\triangle d_{t+1}$$
+
+## ii 
+
+We begin by simplifying the problem:
+
+
+$$d_{t}-p_{t}\approx -k + r_{t+1} -\triangle d_{t+1} + \rho ({p_{t+1}-d_{t+1}})$$
+to compute 
+
+$$Var(d_{t}-p{t}) = Cov (d_{t}-p{t}, d_{t}-p{t}) $$
+$$= Cov(r_{t+1},d_{t}-p_{t})- Cov (\triangle d_{t+1}, d_{t}-p{t}) + \rho \ Cov ({d_{t+1}-p_{t+1},{d_{t}-p{t}}}) $$
+$$ \frac{Cov(r_{t+1},d_{t}-p_{t}) }{Var(d_{t}-p_{t})}-\frac{Cov(\triangle d_{t+1}, d_{t}-p{t}) }{Var(d_{t}-p_{t})}+ \rho \frac{Cov(d_{t+1}-p_{t+1}, d_{t}-p{t}) }{Var(d_{t}-p_{t})}=1$$
+$$ b_{r}-b_{d}+\rho{b_{y}} =1$$
+
+## iii
+For this part of the question, we chose a period of time after the completition of great depression, 1939-2014. We the estimate beta of the excess returns and the beta on log dividend growth. Initially, this beta on the change in the D/P ratio is calculated and compared to the estimated value which is obtained by the relation in ii. We find that the estimated value only has a variation if 3.8 % which is quite low. Thus we can say that the analytical relationship which was derived is well backed up by the data and improves our assumption in stock market prediction.
+```{r}
+
+datam<-data[which(data$year==1939):89,]
+datam=datam%>%mutate(ER=log(VW_Return_Incl._Dividends+1)-
+log(1+`90_Day_Bill_Returns`))%>%select(DPratio,divgrowth,ER)
+reg_r<-lm(ER[2:nrow(datam)]~log(DPratio[1:(nrow(datam)-1)]), data=datam)
+reg_d<-lm(divgrowth[2:nrow(datam)]~log(DPratio[1:(nrow(datam)-1)]), data=datam)
+reg_y<-lm(log(DPratio[2:nrow(datam)]) ~ log(DPratio[1:(nrow(datam)-1)]),
+          data=datam)
+br=as.numeric(reg_r$coefficients[2])
+bd=as.numeric(reg_d$coefficients[2])
+by=as.numeric(reg_y$coefficients[2])
+```
+
+```{r}
+PD<-1/mean(datam$DPratio)
+rho<-PD/(1+PD)
+br_e<-as.numeric(1+bd-rho*by)
+diff<-as.numeric(100*(br-br_e)/br)
+```
+
+
